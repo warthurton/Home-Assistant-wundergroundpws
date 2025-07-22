@@ -62,6 +62,9 @@ async def async_setup_entry(
             if description.feature == FEATURE_FORECAST_DAYPART
         )
 
+    # Call async_init for all sensors to set unit of measurement from statistics if needed
+    await asyncio.gather(*(sensor.async_init() for sensor in sensors))
+
     async_add_entities(sensors)
 
 
@@ -70,6 +73,20 @@ class WundergroundPWSSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_attribution = CONF_ATTRIBUTION
     entity_description: WundergroundPWSSensorEntityDescription
+
+    async def async_init(self):
+        """Async initialization to set unit of measurement from statistics if needed."""
+        from .statistics_helper import async_get_statistics_unit
+        computed_unit = self.entity_description.unit_fn(
+            self.coordinator.hass.config.units is METRIC_SYSTEM) if self._sensor_data is not None else ""
+        if computed_unit == "":
+            stats_unit = await async_get_statistics_unit(self.coordinator.hass, self.entity_id)
+            if stats_unit:
+                self._attr_native_unit_of_measurement = stats_unit
+            else:
+                self._attr_native_unit_of_measurement = ""
+        else:
+            self._attr_native_unit_of_measurement = computed_unit
 
     def __init__(
             self,
@@ -115,8 +132,7 @@ class WundergroundPWSSensor(CoordinatorEntity, SensorEntity):
         self._unit_system = coordinator.unit_system
         self._sensor_data = _get_sensor_data(
             coordinator.data, description.key, self._unit_system, description.feature, forecast_day)
-        self._attr_native_unit_of_measurement = self.entity_description.unit_fn(
-            self.coordinator.hass.config.units is METRIC_SYSTEM) if self._sensor_data is not None else ""
+        # Defer setting _attr_native_unit_of_measurement to async_init
 
     @property
     def available(self) -> bool:
